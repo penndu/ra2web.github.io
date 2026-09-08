@@ -129,16 +129,6 @@ html:-moz-full-screen body {
     height: 570px;
 }
 
-#ra2web-root .video-wrapper .logo {
-    position: absolute;
-    left: 325px;
-    top: 355px;
-    width: 400px;
-    height: 44px;
-    transform: translateX(-50%) translateY(-50%);
-    background-image: var(--res-menu-logo);
-}
-
 #ra2web-root .message-box {
     width: 451px;
     height: 326px;
