@@ -1,8 +1,8 @@
-const RA2WEB_SW_VERSION = "0.87.0-r1f3c93c-ddff99041";
+const RA2WEB_SW_VERSION = "0.87.0-ra650aef-d59fd2eae";
 const RA2WEB_APP_CACHE = "ra2web-app-" + RA2WEB_SW_VERSION;
 const RA2WEB_GAMERES_CACHE = "ra2web-gameres-" + RA2WEB_SW_VERSION;
-const RA2WEB_PRECACHE_URLS = ["/","/index.html","/manifest.webmanifest","/js/app.js?v=0.87.0-r1f3c93c-ddff99041","/js/vendor.js?v=0.87.0-r1f3c93c-ddff99041","/res/werhdexp.mix?v=0.87.0-r1f3c93c-ddff99041","/config.json?v=0.87.0-r1f3c93c-ddff99041","/res/overlay/art.ini?v=0.87.0","/res/overlay/modcd.ini?v=0.87.0","/res/overlay/mpbattle.ini?v=0.87.0","/res/overlay/mpcoop.ini?v=0.87.0","/res/overlay/mpduel.ini?v=0.87.0","/res/overlay/mpfreeforallmd.ini?v=0.87.0","/res/overlay/mpmeat.ini?v=0.87.0","/res/overlay/mpmodes.ini?v=0.87.0","/res/overlay/mpmw.ini?v=0.87.0","/res/overlay/mpnaval.ini?v=0.87.0","/res/overlay/mprace.ini?v=0.87.0","/res/overlay/mpspecial.ini?v=0.87.0","/res/overlay/mpteammd.ini?v=0.87.0","/res/overlay/mpunholy.ini?v=0.87.0","/res/overlay/nodogengikills.ini?v=0.87.0","/res/overlay/ra2.csf?v=0.87.0","/res/overlay/rules.ini?v=0.87.0","/res/overlay/soundcd.ini?v=0.87.0","/res/overlay/ui.ini?v=0.87.0"];
-const RA2WEB_IMMUTABLE_PREFIXES = ["/js/","/res/race/"];
+const RA2WEB_PRECACHE_URLS = ["/","/index.html","/manifest.webmanifest","/js/builds/0.87.0-ra650aef-d59fd2eae/app.js?v=0.87.0-ra650aef-d59fd2eae","/js/builds/0.87.0-ra650aef-d59fd2eae/vendor.js?v=0.87.0-ra650aef-d59fd2eae","/res/werhdexp.mix?v=0.87.0-ra650aef-d59fd2eae","/config.json?v=0.87.0-ra650aef-d59fd2eae","/res/overlay/art.ini?v=0.87.0","/res/overlay/modcd.ini?v=0.87.0","/res/overlay/mpbattle.ini?v=0.87.0","/res/overlay/mpcoop.ini?v=0.87.0","/res/overlay/mpduel.ini?v=0.87.0","/res/overlay/mpfreeforallmd.ini?v=0.87.0","/res/overlay/mpmeat.ini?v=0.87.0","/res/overlay/mpmodes.ini?v=0.87.0","/res/overlay/mpmw.ini?v=0.87.0","/res/overlay/mpnaval.ini?v=0.87.0","/res/overlay/mprace.ini?v=0.87.0","/res/overlay/mpspecial.ini?v=0.87.0","/res/overlay/mpteammd.ini?v=0.87.0","/res/overlay/mpunholy.ini?v=0.87.0","/res/overlay/nodogengikills.ini?v=0.87.0","/res/overlay/ra2.csf?v=0.87.0","/res/overlay/rules.ini?v=0.87.0","/res/overlay/soundcd.ini?v=0.87.0","/res/overlay/ui.ini?v=0.87.0"];
+const RA2WEB_IMMUTABLE_PREFIXES = ["/js/builds/0.87.0-ra650aef-d59fd2eae/","/res/race/"];
 const RA2WEB_STATIC_PREFIXES = ["/res/fonts/"];
 const RA2WEB_UPDATE_SENSITIVE_PATHS = new Set(["/config.json","/servers.json","/mods.json","/official-map-redirect.json","/old/versions.json","/version.json"]);
 const RA2WEB_GAMERES_PREFIXES = ["/v2/","/map/","/mod/","/music/"];
@@ -11,14 +11,13 @@ self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(RA2WEB_APP_CACHE).then((cache) =>
       cache.addAll(RA2WEB_PRECACHE_URLS.map((url) => new Request(url, { cache: "reload" }))),
-    ).then(() => self.skipWaiting()),
+    ),
   );
 });
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     Promise.all([
-      self.clients.claim(),
       notifyClients({ type: "RA2WEB_SW_UPDATE_READY", version: RA2WEB_SW_VERSION }),
     ]),
   );

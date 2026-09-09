@@ -16,28 +16,279 @@
       name="description"
       content="王二火大支持在网页上游玩经典的红色井界游戏，无需下载安装，随时随地在手机、电脑、平板甚至手表上畅玩。提供多种游戏模式和地图，与全球玩家实时对战。"
     />
+    <script id="startup-load-check-bootstrap">/* Kept as an inline, ES5 script: it must run even if the module graph cannot. */
+(function () {
+  'use strict';
+  var config = {"assetVersion":"0.87.0-ra650aef-d59fd2eae","endpoint":"https://telemetry.bj1.wangerhuoda.cn/client-incidents","successSampleRate":0.02};
+  var startedAt = Date.now();
+  var diagnosticId = startedAt.toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+  var active = true;
+  var mounted = false;
+  var failed = false;
+  var reportedFailure = false;
+  var reportTimer;
+  var observer;
+  var elements = {};
+  var errors = [];
+  var phases = [];
+  var phase = 'entry';
+  var progressValue = 15;
+  var statusText = '正在启动客户端...';
+  var detailText = '正在检测客户端配置、界面资源和游戏资源清单。';
+  var uploadStatus = 'not-sent';
+
+  function safeUrl(value) {
+    if (!value) return '';
+    var link = document.createElement('a');
+    link.href = String(value);
+    // Exclude route, account and arbitrary query values. Only the build key is useful here.
+    var version = (link.search || '').match(/(?:^\?|&)v=([^&]*)/);
+    return link.protocol + '//' + link.host + link.pathname + (version ? '?v=' + version[1] : '');
+  }
+
+  function errorMessage(reason) {
+    var message = typeof reason === 'string' ? reason : reason && reason.message;
+    return typeof message === 'string'
+      ? message.replace(/https?:\/\/[^\s"'<>]+/g, safeUrl).slice(0, 800)
+      : '';
+  }
+
+  function resourceTimings() {
+    if (!window.performance || !performance.getEntriesByType) return [];
+    return performance.getEntriesByType('resource').filter(function (entry) {
+      return entry.initiatorType === 'script' || entry.initiatorType === 'link';
+    }).slice(0, 16).map(function (entry) {
+      return {
+        url: safeUrl(entry.name),
+        initiatorType: entry.initiatorType,
+        durationMs: Math.round(entry.duration),
+        transferSize: entry.transferSize === undefined ? null : entry.transferSize,
+        decodedBodySize: entry.decodedBodySize === undefined ? null : entry.decodedBodySize,
+        // Zero is not an HTTP status. It can also mean hidden/unavailable timing information.
+        responseStatus: entry.responseStatus > 0 ? entry.responseStatus : null
+      };
+    });
+  }
+
+  function snapshot(outcome) {
+    return {
+      diagnosticId: diagnosticId,
+      outcome: outcome || (failed ? 'failed' : active ? 'loading' : 'ready'),
+      milestone: 'client-ui',
+      assetVersion: config.assetVersion,
+      phase: phase,
+      progress: progressValue,
+      elapsedMs: Date.now() - startedAt,
+      pageUrl: safeUrl(location.href),
+      userAgent: navigator.userAgent,
+      online: typeof navigator.onLine === 'boolean' ? navigator.onLine : null,
+      visibilityState: document.visibilityState || 'unknown',
+      errors: errors.slice(),
+      phases: phases.slice(),
+      resources: resourceTimings(),
+      uploadStatus: uploadStatus
+    };
+  }
+
+  function report(outcome) {
+    if (!config.endpoint) return;
+    var endpoint = document.createElement('a');
+    endpoint.href = config.endpoint;
+    var isLocal = /^(localhost|127\.[\d.]+|\[::1\])$/.test(location.hostname);
+    // Local previews can use their own receiver; never send their failures to production.
+    if ((isLocal || location.protocol !== 'https:') && endpoint.host !== location.host) return;
+    var context = snapshot(outcome);
+    var request;
+    function finish() {
+      uploadStatus = request.status >= 200 && request.status < 300 ? 'sent' : 'failed';
+      if (uploadStatus === 'failed') console.warn('[startup] Diagnostic upload failed', request.status || 'network');
+    }
+    try {
+      request = new XMLHttpRequest();
+      request.open('POST', config.endpoint, true);
+      request.timeout = 8000;
+      request.setRequestHeader('Content-Type', 'application/json');
+      uploadStatus = 'sending';
+      request.onload = finish;
+      request.onerror = finish;
+      request.ontimeout = finish;
+      request.send(JSON.stringify({
+        eventType: outcome === 'ready' ? 'client_session_started' : 'script_error',
+        buildVersion: config.assetVersion,
+        pageUrl: context.pageUrl,
+        visibilityState: context.visibilityState,
+        screen: 'Startup',
+        message: outcome === 'ready' ? 'Startup client UI ready' : 'Startup failed: ' + errors[0].message,
+        context: { startup: context, successSampleRate: config.successSampleRate }
+      }));
+    } catch (error) {
+      // A blocked diagnostics transport must preserve the original startup error.
+      uploadStatus = 'failed';
+      console.warn('[startup] Diagnostic transport unavailable', errorMessage(error));
+    }
+  }
+
+  function flushFailure() {
+    if (reportedFailure || !failed) return;
+    reportedFailure = true;
+    clearTimeout(reportTimer);
+    report('failed');
+  }
+
+  function render() {
+    if (!mounted || !active) return;
+    elements.status.textContent = statusText;
+    elements.detail.textContent = detailText;
+    elements.progress.setAttribute('aria-valuenow', String(progressValue));
+    elements.bar.style.width = progressValue + '%';
+    if (failed) {
+      elements.panel.dataset.state = 'error';
+      elements.title.textContent = '加载检测未通过';
+      elements.retry.hidden = false;
+      elements.diagnostics.hidden = false;
+    }
+  }
+
+  function fail(message, reason, resourceUrl, kind) {
+    if (!active) return;
+    var description = errorMessage(reason) || (resourceUrl ? '无法加载 ' + safeUrl(resourceUrl) : '浏览器未能完成此启动步骤。');
+    var record = { kind: kind || 'initialization', message: description, url: safeUrl(resourceUrl), phase: phase };
+    if (errors.length < 8 && !errors.some(function (item) {
+      return item.kind === record.kind && item.message === record.message && item.url === record.url;
+    })) errors.push(record);
+    if (!failed) {
+      failed = true;
+      clearTimeout(slowTimer);
+      statusText = message || '客户端未能继续加载';
+      detailText = description;
+      // Gather dependent-module error events from the same failure, then send once.
+      reportTimer = setTimeout(flushFailure, 300);
+    }
+    render();
+  }
+
+  function onError(event) {
+    var target = event.target;
+    var tag = target && target.tagName;
+    if (tag === 'SCRIPT' || (tag === 'LINK' && /^(modulepreload|stylesheet)$/.test(target.rel))) {
+      fail('启动脚本或依赖加载失败', null, target.src || target.href, 'resource');
+    } else if (target === window || event.error || event.message) {
+      fail('启动脚本执行失败', event.error || event.message, event.filename, 'javascript');
+    }
+  }
+  function onRejection(event) { fail('客户端初始化失败', event.reason, '', 'promise'); }
+  function onOffline() { fail('网络连接已断开', '浏览器当前处于离线状态。', '', 'offline'); }
+
+  var slowTimer = setTimeout(function () {
+    if (!active || failed) return;
+    statusText = '加载时间较长';
+    detailText = '启动尚未完成，可以查看诊断信息或重新加载。';
+    render();
+    if (mounted) {
+      elements.panel.dataset.state = 'slow';
+      elements.retry.hidden = false;
+      elements.diagnostics.hidden = false;
+    }
+  }, 15000);
+
+  function dismiss() {
+    if (!active) return;
+    if (failed) flushFailure();
+    else if (Math.random() < config.successSampleRate) report('ready');
+    active = false;
+    clearTimeout(slowTimer);
+    window.removeEventListener('error', onError, true);
+    window.removeEventListener('unhandledrejection', onRejection);
+    window.removeEventListener('offline', onOffline);
+    if (observer) observer.disconnect();
+    if (mounted) elements.host.remove();
+    delete window.__ra2webStartupLoadCheck;
+  }
+
+  function mount() {
+    if (mounted || !active) return;
+    var root = document.getElementById('ra2web-root');
+    elements = {
+      host: document.getElementById('startup-load-check-host'),
+      panel: document.getElementById('startup-load-check'),
+      title: document.getElementById('startup-load-check-title'),
+      status: document.getElementById('startup-load-check-status'),
+      detail: document.getElementById('startup-load-check-detail'),
+      progress: document.getElementById('startup-load-check-progress'),
+      bar: document.getElementById('startup-load-check-progress-bar'),
+      retry: document.getElementById('startup-load-check-retry'),
+      diagnostics: document.getElementById('startup-load-check-diagnostics'),
+      diagnosticText: document.getElementById('startup-load-check-diagnostic-text')
+    };
+    mounted = true;
+    elements.diagnostics.onclick = function () {
+      elements.diagnosticText.hidden = false;
+      elements.diagnosticText.value = JSON.stringify(snapshot(), null, 2);
+      elements.diagnosticText.focus();
+      elements.diagnosticText.select();
+    };
+    document.body.classList.remove('no-js');
+    render();
+    observer = new MutationObserver(function () {
+      for (var i = 0; i < root.children.length; i++) {
+        if (root.children[i] !== elements.host) { dismiss(); break; }
+      }
+    });
+    observer.observe(root, { childList: true });
+  }
+
+  window.__ra2webStartupLoadCheck = {
+    mount: mount,
+    dismiss: dismiss,
+    fail: fail,
+    setPhase: function (message, description, value) {
+      if (!active || failed) return;
+      phase = message;
+      if (phases.length < 12) phases.push({ phase: phase, elapsedMs: Date.now() - startedAt });
+      statusText = message;
+      if (description) detailText = description;
+      if (typeof value === 'number' && isFinite(value)) progressValue = Math.max(0, Math.min(100, Math.round(value)));
+      render();
+    },
+    setProgress: function (value) {
+      if (!active || failed || typeof value !== 'number' || !isFinite(value)) return;
+      progressValue = Math.max(0, Math.min(100, Math.round(value)));
+      render();
+    }
+  };
+  window.__ra2webStartupDiagnostic = { snapshot: snapshot };
+  window.addEventListener('error', onError, true);
+  window.addEventListener('unhandledrejection', onRejection);
+  window.addEventListener('offline', onOffline);
+
+  function checkBrowser() {
+    try {
+      // Syntax retained by the browser build (class static blocks are transpiled).
+      eval('class C { field = 1; async test(...args) { let spread = {...({a: 2})}; return spread?.a ?? 0; } }');
+    } catch (error) {
+      return '当前浏览器不支持客户端所需的 JavaScript 语法，请更新系统或浏览器。';
+    }
+    if (!window.WebAssembly || !window.Promise || !Promise.any || !window.URL || !window.MutationObserver || !window.fetch) {
+      return '当前浏览器缺少客户端所需的 WebAssembly、Promise.any 或网络接口，请更新系统或浏览器。';
+    }
+    if (!window.Blob || !Blob.prototype.arrayBuffer) return '当前浏览器不支持资源文件读取，请更新系统或浏览器。';
+    var canvas = document.createElement('canvas');
+    if (!window.WebGLRenderingContext || !(canvas.getContext('webgl') || canvas.getContext('experimental-webgl'))) {
+      return '浏览器无法创建 WebGL 图形环境，请检查硬件加速设置或更新浏览器。';
+    }
+    return '';
+  }
+  var unsupported = checkBrowser();
+  window.browserSupported = !unsupported;
+  if (unsupported) fail('当前浏览器不受支持', unsupported, '', 'compatibility');
+  else if (navigator.onLine === false) onOffline();
+})();
+</script>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/favicon.ico" />
     <link rel="apple-touch-icon" href="/res/pwa/icon-192.png" />
-    <script>
-      var browserSupported = true;
-      try {
-        eval("'use strict'; class C { async test(...args) { let spread = {...({a: 2})} }}");
-        var canvas = document.createElement('canvas');
-        browserSupported = !!(
-          window.WebGLRenderingContext &&
-          (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')) &&
-          new Blob(['test'], { type: 'text/plain' }).arrayBuffer
-        );
-      } catch (e) {
-        browserSupported = false;
-      }
-      if (!browserSupported) {
-        alert('Browser not supported.\n\nPlease download the latest Google Chrome, Mozilla Firefox or Microsoft Edge.');
-      }
-    </script>
-    <link href="/res/fonts/fonts.css?v=0.87.0-r1f3c93c-ddff99041" rel="stylesheet" />
-    <link rel="stylesheet" href="/style.css?v=0.87.0-r1f3c93c-ddff99041" type="text/css" />
+    <link href="/res/fonts/fonts.css?v=0.87.0-ra650aef-d59fd2eae" rel="stylesheet" />
+    <link rel="stylesheet" href="/style.css?v=0.87.0-ra650aef-d59fd2eae" type="text/css" />
     <style>
       #ra2web-root {
         position: relative;
@@ -169,6 +420,15 @@
       #startup-load-check-host [hidden] {
         display: none !important;
       }
+      #startup-load-check-diagnostic-text {
+        width: 100%;
+        height: 120px;
+        margin-top: 12px;
+        box-sizing: border-box;
+        background: #111;
+        color: #ddd;
+        font-size: 12px;
+      }
       @keyframes startup-load-check-spin {
         to {
           transform: rotate(360deg);
@@ -183,9 +443,9 @@
     <script>
       window.__ra2webTransportMode = 'websocket-only';
     </script>
-    <script type="module" crossorigin src="/js/app.js?v=0.87.0-r1f3c93c-ddff99041"></script>
-    <link rel="modulepreload" crossorigin href="/js/vendor.js?v=0.87.0-r1f3c93c-ddff99041">
-    <link rel="modulepreload" crossorigin href="/js/7zz.js?v=0.87.0-r1f3c93c-ddff99041">
+    <script type="module" crossorigin src="/js/builds/0.87.0-ra650aef-d59fd2eae/app.js?v=0.87.0-ra650aef-d59fd2eae"></script>
+    <link rel="modulepreload" crossorigin href="/js/builds/0.87.0-ra650aef-d59fd2eae/vendor.js?v=0.87.0-ra650aef-d59fd2eae">
+    <link rel="modulepreload" crossorigin href="/js/builds/0.87.0-ra650aef-d59fd2eae/7zz.js?v=0.87.0-ra650aef-d59fd2eae">
   </head>
   <body class="no-js">
     <div id="ra2web-root">
@@ -209,7 +469,7 @@
               正在检测客户端配置、界面资源和游戏资源清单。
             </p>
             <div class="startup-load-check-progress-meta">
-              <span>加载版本：<strong id="startup-load-check-version">0.87.0-r1f3c93c-ddff99041</strong></span>
+              <span>加载版本：<strong id="startup-load-check-version">0.87.0-ra650aef-d59fd2eae</strong></span>
               <span>启动进度</span>
             </div>
             <div
@@ -223,6 +483,7 @@
             >
               <div id="startup-load-check-progress-bar" class="startup-load-check-progress-bar"></div>
             </div>
+            <textarea id="startup-load-check-diagnostic-text" aria-label="可复制的启动诊断信息" readonly hidden></textarea>
             <p class="startup-load-check-hint">如果页面长时间停留在这里，可以重新加载后再试。</p>
             <p class="startup-load-check-feedback">
               遇到问题，可访问
@@ -231,6 +492,7 @@
             </p>
           </div>
           <div class="message-box-footer">
+            <button id="startup-load-check-diagnostics" class="dialog-button" type="button" hidden>诊断信息</button>
             <button
               id="startup-load-check-retry"
               class="dialog-button"
@@ -245,96 +507,7 @@
       </div>
     </div>
     <script id="startup-load-check-runtime">
-      (() => {
-        const root = document.getElementById('ra2web-root');
-        const host = document.getElementById('startup-load-check-host');
-        const panel = document.getElementById('startup-load-check');
-        const title = document.getElementById('startup-load-check-title');
-        const status = document.getElementById('startup-load-check-status');
-        const detail = document.getElementById('startup-load-check-detail');
-        const progress = document.getElementById('startup-load-check-progress');
-        const progressBar = document.getElementById('startup-load-check-progress-bar');
-        const retry = document.getElementById('startup-load-check-retry');
-        if (!root || !host || !panel || !title || !status || !detail || !progress || !progressBar || !retry) return;
-
-        let active = true;
-        let mainUiObserver;
-        const formatReason = (reason) => {
-          if (typeof reason === 'string') return reason;
-          if (reason && typeof reason.message === 'string') return reason.message;
-          const targetUrl = reason && reason.target && (reason.target.src || reason.target.href);
-          if (targetUrl) {
-            try {
-              const url = new URL(targetUrl, location.href);
-              return `无法加载 ${url.origin}${url.pathname}`;
-            } catch (_) {
-              return '浏览器未能加载启动资源。';
-            }
-          }
-          return '';
-        };
-        const setProgress = (value) => {
-          if (!active || !Number.isFinite(value)) return;
-          const normalized = Math.max(0, Math.min(100, Math.round(value)));
-          progress.setAttribute('aria-valuenow', String(normalized));
-          progressBar.style.width = `${normalized}%`;
-        };
-        const setPhase = (message, description, progressValue) => {
-          if (!active) return;
-          if (message) status.textContent = String(message);
-          if (description) detail.textContent = String(description);
-          if (typeof progressValue === 'number') setProgress(progressValue);
-        };
-        const fail = (message, reason) => {
-          if (!active) return;
-          clearTimeout(slowTimer);
-          panel.dataset.state = 'error';
-          title.textContent = '加载检测未通过';
-          status.textContent = message || '客户端未能继续加载';
-          detail.textContent = formatReason(reason) || '请检查网络连接，然后重新加载页面。';
-          retry.hidden = false;
-        };
-        const onWindowError = (event) => fail('启动资源加载失败', event.error || event);
-        const onUnhandledRejection = (event) => fail('客户端初始化失败', event.reason);
-        const onOffline = () => fail('网络连接已断开', '浏览器当前处于离线状态。');
-        const slowTimer = setTimeout(() => {
-          if (!active || panel.dataset.state === 'error') return;
-          panel.dataset.state = 'slow';
-          status.textContent = '加载时间较长';
-          detail.textContent = '资源清单或启动文件仍未完成加载，请检查网络连接。';
-          retry.hidden = false;
-        }, 15000);
-        const dismiss = () => {
-          if (!active) return;
-          active = false;
-          clearTimeout(slowTimer);
-          window.removeEventListener('error', onWindowError, true);
-          window.removeEventListener('unhandledrejection', onUnhandledRejection);
-          window.removeEventListener('offline', onOffline);
-          mainUiObserver?.disconnect();
-          host.remove();
-          delete window.__ra2webStartupLoadCheck;
-        };
-
-        window.addEventListener('error', onWindowError, true);
-        window.addEventListener('unhandledrejection', onUnhandledRejection);
-        window.addEventListener('offline', onOffline);
-        window.__ra2webStartupLoadCheck = { dismiss, fail, setPhase, setProgress };
-        document.body.classList.remove('no-js');
-
-        if (typeof MutationObserver === 'function') {
-          mainUiObserver = new MutationObserver(() => {
-            if ([...root.children].some((child) => child !== host)) dismiss();
-          });
-          mainUiObserver.observe(root, { childList: true });
-        }
-
-        if (!browserSupported) {
-          fail('当前浏览器不受支持', '请使用最新版 Google Chrome、Mozilla Firefox 或 Microsoft Edge。');
-        } else if (navigator.onLine === false) {
-          onOffline();
-        }
-      })();
+      window.__ra2webStartupLoadCheck.mount();
     </script>
   </body>
 </html>

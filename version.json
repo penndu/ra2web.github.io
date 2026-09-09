@@ -1,3 +1,5 @@
 {
-  "assetVersion": "0.87.0-r1f3c93c-ddff99041"
+  "appVersion": "0.87.0",
+  "assetVersion": "0.87.0-ra650aef-d59fd2eae",
+  "jsBaseUrl": "/js/builds/0.87.0-ra650aef-d59fd2eae/"
 }
